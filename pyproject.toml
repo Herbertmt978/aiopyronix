@@ -1,0 +1,107 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiopyronix"
+version = "0.1.0"
+description = "Asynchronous PyronixCloud client for Pyronix alarm panels, with explicit sessions"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Herbertmt978" }]
+requires-python = ">=3.14"
+dependencies = [
+  "aiohttp>=3.13.0",
+  "cryptography>=47.0.0",
+]
+keywords = ["pyronix", "homecontrol", "alarm", "asyncio", "home-assistant"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Home Automation",
+  "Topic :: Security",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Source = "https://github.com/Herbertmt978/aiopyronix"
+Issues = "https://github.com/Herbertmt978/aiopyronix/issues"
+Changelog = "https://github.com/Herbertmt978/aiopyronix/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+dev = [
+  "mypy==2.4.1",
+  "pytest==9.0.3",
+  "pytest-asyncio==1.4.0",
+  "pytest-cov==7.1.0",
+  "ruff==0.17.3",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/tests", "/CHANGELOG.md"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+# Unhandled task exceptions and resource warnings are defects here, not noise.
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["aiopyronix"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src/aiopyronix"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+# Home Assistant Core's rule selection, so the library reads like the integration.
+select = [
+  "A001", "ASYNC", "B", "BLE", "C", "COM818", "D", "DTZ003", "DTZ004", "DTZ011", "E", "F",
+  "FLY", "FURB", "G", "I", "INP", "ISC", "ICN001", "ICN002", "LOG", "N804", "N805", "N806",
+  "N815", "PERF", "PGH", "PIE", "PL", "PT", "PTH", "PYI", "RET", "RSE", "RUF", "S102", "S103",
+  "S107", "S108", "S301", "S306", "S307", "S313", "S314", "S315", "S316", "S317", "S318",
+  "S319", "S601", "S602", "S604", "S608", "S609", "SIM", "SLF", "SLOT", "T100", "T20", "TC",
+  "TID", "TRY", "UP", "W",
+]
+ignore = [
+  "D202", "D203", "D213", "D406", "D407", "D417", "E501", "PLC1901", "PLR0911", "PLR0912",
+  "PLR0913", "PLR0915", "PLR0917", "PLR2004", "PLW0108", "PLW2901", "PT011", "PT018",
+  "RUF001", "RUF012", "SIM102", "SIM103", "SIM108", "TC001", "TC002", "TC003", "TRY003",
+  "COM812",
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = ["aiopyronix", "tests"]
+combine-as-imports = true
+split-on-trailing-comma = false
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations".msg = "Not needed; the library requires Python 3.14"
+"async_timeout".msg = "use asyncio.timeout instead"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests exercise private session state directly.
+"tests/*.py" = ["D", "SLF001"]

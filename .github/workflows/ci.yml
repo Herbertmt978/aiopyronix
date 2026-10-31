@@ -1,0 +1,84 @@
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Install the package and development tools
+        run: python -m pip install --editable . --group dev
+
+      - name: Run Ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Check strict typing
+        run: mypy
+
+      - name: Run tests with full branch coverage
+        run: pytest --cov
+
+  minimum:
+    name: Oldest supported dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      # Keep these equal to the lower bounds in pyproject.toml.
+      - name: Install the oldest supported dependencies
+        run: python -m pip install "aiohttp==3.13.0" "cryptography==47.0.0" --editable . --group dev
+
+      - name: Run tests
+        run: pytest
+
+  package:
+    name: Build and inspect distributions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Build the sdist and wheel
+        run: |
+          python -m pip install build==1.6.1 twine==7.0.0
+          python -m build
+          python -m twine check --strict dist/*
+
+      - name: Check the wheel carries its type information
+        run: python -m zipfile --list dist/*.whl | grep -q "aiopyronix/py.typed"
