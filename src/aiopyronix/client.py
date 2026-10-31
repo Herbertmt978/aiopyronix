@@ -125,17 +125,17 @@ def ingest(snapshot: Snapshot, record: Mapping[str, Any]) -> None:
     """Retain only area state, allowed operations and firmware; drop raw user data."""
     kind = record.get("type")
     if kind == "area":
-        for row in record.get("Detail", []):
-            index, value = row.get("R"), row.get("V")
-            if type(index) is int and 0 <= index <= 255 and type(value) is int:
-                snapshot["areas"][index] = {
-                    "name": str(row.get("N", "Area"))[:80],
-                    "value": value,
-                    "status": STATUS.get(value, "Unknown"),
-                }
+        for index, row in _area_rows(record).items():
+            snapshot["areas"][index] = {
+                "name": str(row.get("N", "Area"))[:80],
+                "value": row["V"],
+                "status": STATUS.get(row["V"], "Unknown"),
+            }
     elif kind == "user":
-        snapshot["can_arm"] = _permitted_areas(record, "SetAreas")
-        snapshot["can_disarm"] = _permitted_areas(record, "UnsetAreas")
+        # Check both before keeping either, so a malformed record changes nothing.
+        can_arm = _permitted_areas(record, "SetAreas")
+        can_disarm = _permitted_areas(record, "UnsetAreas")
+        snapshot["can_arm"], snapshot["can_disarm"] = can_arm, can_disarm
         snapshot["permissions_received"] = True
     elif kind == "panel":
         hi, lo = record.get("VersionHi"), record.get("VersionLo")
@@ -143,8 +143,23 @@ def ingest(snapshot: Snapshot, record: Mapping[str, Any]) -> None:
             snapshot["firmware"] = f"{hi}.{lo}"
 
 
+def _area_rows(record: Mapping[str, Any]) -> dict[int, dict[str, Any]]:
+    """Return the usable rows of an area record by area; reject a malformed record."""
+    rows = record.get("Detail", [])
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ProtocolError("Invalid panel status")
+    return {
+        row["R"]: row
+        for row in rows
+        if type(row.get("R")) is int
+        and 0 <= row["R"] <= 255
+        and type(row.get("V")) is int
+    }
+
+
 def _permitted_areas(record: Mapping[str, Any], source: str) -> set[int]:
-    values = record.get(source, {}).get("R", [])
+    areas = record.get(source, {})
+    values = areas.get("R", []) if isinstance(areas, dict) else None
     if not isinstance(values, list) or any(
         type(v) is not int or not 0 <= v <= 255 for v in values
     ):
@@ -501,7 +516,10 @@ class PanelClient:
             )
         if not body.strip():
             return
-        record = json.loads(body)
+        try:
+            record = json.loads(body)
+        except ValueError, RecursionError:
+            record = None  # Undecodable, or nested too deeply to decode.
         if not isinstance(record, dict):
             raise ProtocolError("Invalid panel status")
         ingest(self.data, record)
@@ -524,9 +542,7 @@ class PanelClient:
         if self._pending is None:
             return
         operation, area, future = self._pending
-        if future.done() or not any(
-            r.get("R") == area for r in record.get("Detail", [])
-        ):
+        if future.done() or area not in _area_rows(record):
             return
         value = self.data["areas"][area]["value"]
         if operation_confirmed(operation, value):

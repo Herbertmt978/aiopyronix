@@ -3,6 +3,7 @@ from collections import deque
 import copy
 import hashlib
 import json
+import logging
 import time
 from types import SimpleNamespace
 
@@ -701,7 +702,9 @@ def corrupted(packet):
         (lambda wire: wire.packet("f", b""), "closed or rejected"),
         (lambda wire: wire.packet("e", b""), "closed or rejected"),
         (lambda wire: wire.packet("d", b"[]"), "Invalid panel status"),
-        (lambda wire: wire.packet("d", b"{"), "connection failed"),
+        (lambda wire: wire.packet("d", b"{"), "Invalid panel status"),
+        # Deeper than the JSON decoder can recurse within the 64 KiB body limit.
+        (lambda wire: wire.packet("d", b"[" * 65535), "Invalid panel status"),
         (lambda wire: corrupted(wire.area()), "integrity"),
         (lambda wire: "(not base64!)", "Invalid transport encoding"),
         (lambda wire: "unframed", "transport prefix"),
@@ -716,6 +719,57 @@ async def test_invalid_data_after_login_ends_session_without_reauth(
     await asyncio.wait_for(client._reader, 1)
     assert client.state == "error" and message in client.detail
     assert wire.closed and http.connections == 1 and wire.commands == []
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        ({"type": "user", "SetAreas": [0]}, "Invalid panel permissions"),
+        (
+            {"type": "user", "SetAreas": {"R": []}, "UnsetAreas": None},
+            "Invalid panel permissions",
+        ),
+        ({"type": "area", "Detail": 5}, "Invalid panel status"),
+        ({"type": "area", "Detail": "never-log-this"}, "Invalid panel status"),
+        ({"type": "area", "Detail": {"R": 0, "V": 1}}, "Invalid panel status"),
+        ({"type": "area", "Detail": [1]}, "Invalid panel status"),
+        (
+            {"type": "area", "Detail": [{"R": 0, "V": 1}, ["never-log-this"]]},
+            "Invalid panel status",
+        ),
+    ],
+)
+async def test_malformed_record_ends_session_without_confirming_or_retrying(
+    make_client, caplog, record, message
+):
+    caplog.set_level(logging.DEBUG)
+    client, wire, http = make_client("lost_ack")
+    await client.connect()
+    before = client.snapshot()
+    request = asyncio.create_task(client.control("arm", 0))
+    await wire.command_sent.wait()
+    wire.push_record(record)
+    with pytest.raises(CommandUnconfirmedError):
+        await request
+    # The reader ends by itself, without an exception left for nobody to retrieve.
+    await asyncio.wait_for(client._reader, 1)
+    assert client.state == "error" and client.detail == message
+    assert client.snapshot() == before
+    assert wire.closed and http.connections == 1 and len(wire.commands) == 1
+    assert caplog.records == []
+
+
+async def test_unusable_area_row_never_settles_a_command(make_client):
+    client, wire, _http = make_client("lost_ack", initial=6)
+    await client.connect()
+    request = asyncio.create_task(client.control("arm", 0))
+    await wire.command_sent.wait()
+    # The row names the area, but its value is unusable: the earlier
+    # "Set Cancelled" must not be read as the panel refusing this command.
+    wire.push_record({"type": "area", "Detail": [{"R": 0, "N": "Day Set", "V": "1"}]})
+    wire.push_area(1)
+    assert (await request)["areas"][0]["value"] == 1
+    assert len(wire.commands) == 1 and client.connected
 
 
 @pytest.mark.parametrize("value", [4, 5, 6])
